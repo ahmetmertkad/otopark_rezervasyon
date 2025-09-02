@@ -67,3 +67,30 @@ class RatePlanViewSet(viewsets.ModelViewSet):
         if lot_id:
             qs = qs.filter(lot_id=lot_id)
         return qs
+
+
+from rest_framework import viewsets, permissions
+from .models import Reservation, CheckEvent
+from .serializers import ReservationSerializer, CheckEventSerializer
+
+class ReservationViewSet(viewsets.ModelViewSet):
+    queryset = Reservation.objects.select_related('lot','user').all()
+    serializer_class = ReservationSerializer
+
+    def get_permissions(self):
+        # GET herkes görebilsin, POST sadece login kullanıcı
+        if self.request.method in ['GET', 'HEAD', 'OPTIONS']:
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]  # veya IsAdminUser
+
+    def perform_create(self, serializer):
+        # user varsa otomatik set et
+        if self.request.user.is_authenticated:
+            serializer.save(user=self.request.user)
+        else:
+            serializer.save()
+
+class CheckEventViewSet(viewsets.ModelViewSet):
+    queryset = CheckEvent.objects.select_related('reservation','gorevli').all()
+    serializer_class = CheckEventSerializer
+    permission_classes = [permissions.IsAdminUser]  # sadece görevliler eklesin
