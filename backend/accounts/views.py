@@ -61,3 +61,22 @@ class LogoutView(APIView):
 
     def get(self, request):
         return Response({"detail": "Logout için POST kullanın."})
+
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import permissions, status
+from rest_framework_simplejwt.token_blacklist.models import (
+    OutstandingToken, BlacklistedToken
+)
+
+class LogoutAllView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        tokens = OutstandingToken.objects.filter(user=user)
+        for t in tokens:
+            BlacklistedToken.objects.get_or_create(token=t)
+        return Response({"detail": "Tüm cihazlardan çıkış yapıldı."}, status=status.HTTP_200_OK)
