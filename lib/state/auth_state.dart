@@ -1,6 +1,7 @@
+// lib/state/auth_state.dart
 import 'package:flutter/foundation.dart';
-import '../services/auth/auth_api.dart';
-import '../services/auth/token_storage.dart';
+import 'package:otopark_rezervasyon/services/auth/auth_api.dart';
+import 'package:otopark_rezervasyon/services/auth/token_storage.dart';
 
 class AuthState extends ChangeNotifier {
   final AuthApi api;
@@ -8,33 +9,45 @@ class AuthState extends ChangeNotifier {
 
   bool loading = true;
   bool authed = false;
+  bool busy = false;
+  String? errorText;
 
   AuthState(this.api, this.storage);
 
-  /// Uygulama açılışında çağır: token varsa /me ile doğrula
   Future<void> bootstrap() async {
+    final acc = await storage.access;
+    authed = acc != null && acc.isNotEmpty;
+    loading = false;
+    notifyListeners();
+  }
+
+  Future<void> login(String u, String p) async {
+    busy = true;
+    errorText = null;
+    notifyListeners();
     try {
-      final acc = await storage.access;
-      if (acc == null || acc.isEmpty) {
-        authed = false;
-      } else {
-        await api
-            .me(); // access geçerliyse 200 döner; gerekirse interceptor refresh eder.
-        authed = true;
-      }
-    } catch (_) {
+      await api.login(u, p);
+      authed = true;
+    } catch (e) {
+      errorText = e.toString();
       authed = false;
     } finally {
-      loading = false;
+      busy = false;
       notifyListeners();
     }
   }
 
-  Future<void> doLogout({bool all = false}) async {
+  Future<void> logout() async {
+    busy = true;
+    notifyListeners();
     try {
-      await api.logout(all: all);
+      await api.logout();
+    } catch (_) {
+      // sessiz geç
     } finally {
+      await storage.clear();
       authed = false;
+      busy = false;
       notifyListeners();
     }
   }

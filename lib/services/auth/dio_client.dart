@@ -1,12 +1,12 @@
+// lib/net/dio_client.dart
 import 'dart:async';
 import 'package:dio/dio.dart';
-import 'token_storage.dart';
+import '../auth/token_storage.dart';
 
 class DioClient {
   final Dio dio;
   final TokenStorage storage;
 
-  // Aynı anda birden çok 401 geldiğinde race condition'ı önlemek için
   bool _isRefreshing = false;
   final List<Completer<void>> _refreshWaiters = [];
 
@@ -18,10 +18,24 @@ class DioClient {
           receiveTimeout: const Duration(seconds: 20),
         ),
       ) {
+    // Log interceptor – isteği görüyor musun diye
+    dio.interceptors.add(
+      LogInterceptor(
+        request: true,
+        requestBody: true,
+        requestHeader: true,
+        responseBody: true,
+        error: true,
+      ),
+    );
+
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          // Access varsa otomatik Bearer ekle
+          // Login/Register/Verify/Refresh gibi çağrılarda auth ekleme
+          if (options.extra['skipAuth'] == true) {
+            return handler.next(options);
+          }
           final access = await storage.access;
           if (access != null && access.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $access';
@@ -29,10 +43,11 @@ class DioClient {
           handler.next(options);
         },
         onError: (err, handler) async {
-          // Sadece 401 ise ve request zaten retry edilmiş değilse refresh dene
           if (err.response?.statusCode == 401) {
             final retry = await _handle401AndRefresh(err.requestOptions);
-            if (retry != null) return handler.resolve(retry);
+            if (retry != null) {
+              return handler.resolve(retry);
+            }
           }
           handler.next(err);
         },
@@ -40,68 +55,56 @@ class DioClient {
     );
   }
 
-  /// 401 geldiğinde refresh akışı:
-  /// - Eşzamanlı 401'leri kuyruklar (tek refresh çağrısı yapılır)
-  /// - Refresh başarılıysa orijinal isteği yeniden gönderir
-  /// - Refresh başarısızsa null döner (UI logout'a yönlendirir)
   Future<Response<dynamic>?> _handle401AndRefresh(
     RequestOptions failedReq,
   ) async {
     final refresh = await storage.refresh;
     if (refresh == null || refresh.isEmpty) return null;
 
-    // Zaten refresh oluyorsa bekle
     if (_isRefreshing) {
       final waiter = Completer<void>();
       _refreshWaiters.add(waiter);
-      await waiter.future; // refresh bittikten sonra devam et
+      await waiter.future;
     } else {
       _isRefreshing = true;
       try {
-        // Refresh isteğinde Authorization header olmasın
         final r = await dio.post(
           '/account/auth/token/refresh/',
           data: {'refresh': refresh},
-          options: Options(headers: {'Authorization': null}),
+          options: Options(
+            headers: {'Authorization': null},
+            extra: {'skipAuth': true}, // güvenli olsun
+          ),
         );
 
-        // Yeni access (ve rotation açıksa yeni refresh) kaydet
         final newAccess = r.data['access'] as String?;
         final newRefresh = r.data['refresh'] as String?;
-        if (newAccess != null) {
+        if (newAccess != null && newAccess.isNotEmpty) {
           await storage.updateAccess(newAccess);
         }
-        if (newRefresh != null) {
-          // rotation açıksa backend yeni refresh döndürebilir
-          await storage.save(
-            newAccess ?? await storage.access ?? '',
-            newRefresh,
-          );
+        if (newRefresh != null && newRefresh.isNotEmpty) {
+          final acc = await storage.access ?? '';
+          await storage.save(acc, newRefresh);
         }
-      } catch (e) {
-        // Refresh başarısız → tokenlar silinsin; UI login sayfasına gönderecek
+      } catch (_) {
         await storage.clear();
+      } finally {
         _isRefreshing = false;
-        // Bekleyen herkese haber ver
         for (final c in _refreshWaiters) {
           c.complete();
         }
         _refreshWaiters.clear();
-        return null;
       }
-      _isRefreshing = false;
-      for (final c in _refreshWaiters) {
-        c.complete();
-      }
-      _refreshWaiters.clear();
     }
 
-    // Orijinal isteği yeniden gönder
     final newAccess = await storage.access;
     final opts = Options(
       method: failedReq.method,
       headers: Map<String, dynamic>.from(failedReq.headers)
-        ..['Authorization'] = newAccess != null ? 'Bearer $newAccess' : null,
+        ..['Authorization'] =
+            (newAccess != null && newAccess.isNotEmpty)
+                ? 'Bearer $newAccess'
+                : null,
       responseType: failedReq.responseType,
       contentType: failedReq.contentType,
       sendTimeout: failedReq.sendTimeout,

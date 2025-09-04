@@ -1,29 +1,31 @@
-import 'package:flutter/foundation.dart';
-import '../services/auth/token_storage.dart';
-import '../services/auth/dio_client.dart';
-import '../services/auth/auth_api.dart';
-import 'package:dio/dio.dart';
+import 'package:otopark_rezervasyon/services/auth/auth_api.dart';
+import 'package:otopark_rezervasyon/services/auth/dio_client.dart';
+import 'package:otopark_rezervasyon/services/auth/token_storage.dart';
+import 'package:otopark_rezervasyon/services/parking/parking_api.dart';
 
 class AppConfig {
-  final String baseUrl;
-  late final TokenStorage storage;
-  late final DioClient dioClient;
-  late final AuthApi authApi;
+  final DioClient dio;
+  final TokenStorage storage;
+  final AuthApi authApi;
+  final ParkingApi parkingApi; // <-- eklendi
 
-  AppConfig._(this.baseUrl);
+  AppConfig({
+    required this.dio,
+    required this.storage,
+    required this.authApi,
+    required this.parkingApi, // <-- eklendi
+  });
 
   static Future<AppConfig> init({required String baseUrl}) async {
-    final c = AppConfig._(baseUrl);
-    c.storage = TokenStorage();
-    c.dioClient = DioClient(baseUrl: baseUrl, storage: c.storage);
-
-    if (kDebugMode) {
-      c.dioClient.dio.interceptors.add(
-        LogInterceptor(requestBody: true, responseBody: true),
-      );
-    }
-
-    c.authApi = AuthApi(client: c.dioClient, storage: c.storage);
-    return c;
+    final storage = TokenStorage();
+    final dio = DioClient(baseUrl: baseUrl, storage: storage);
+    final authApi = AuthApi(client: dio, storage: storage);
+    final parkingApi = ParkingApi(dio); // <-- eklendi
+    return AppConfig(
+      dio: dio,
+      storage: storage,
+      authApi: authApi,
+      parkingApi: parkingApi, // <-- eklendi
+    );
   }
 }

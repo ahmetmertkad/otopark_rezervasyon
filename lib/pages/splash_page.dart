@@ -1,3 +1,4 @@
+// lib/pages/splash_page.dart
 import 'package:flutter/material.dart';
 
 class SplashPage extends StatelessWidget {
