@@ -2,6 +2,8 @@
 import 'package:flutter/material.dart';
 import 'parking_list_page.dart';
 import 'parking_lot_create_page.dart';
+import 'rate_plan_list_page.dart'; // tarifeler için liste sayfası
+import 'rate_plan_create_page.dart'; // tarifeler için ekleme sayfası
 import 'package:provider/provider.dart';
 import '../services/parking/parking_api.dart';
 import '../state/auth_state.dart';
@@ -30,6 +32,7 @@ class HomePage extends StatelessWidget {
           spacing: 16,
           runSpacing: 16,
           children: [
+            // --- OTOPARKLAR ---
             ElevatedButton.icon(
               onPressed: () {
                 Navigator.push(
@@ -49,7 +52,6 @@ class HomePage extends StatelessWidget {
                         (_) => ParkingLotCreatePage(
                           api: api,
                           onCreated: () {
-                            // istersen burada snackbar göster
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Otopark eklendi')),
                             );
@@ -60,6 +62,37 @@ class HomePage extends StatelessWidget {
               },
               icon: const Icon(Icons.add_business),
               label: const Text('Otopark Ekle'),
+            ),
+
+            // --- TARİFELER ---
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder:
+                        (_) => RatePlanListPage(api: api), // <-- düzeltildi
+                  ),
+                );
+              },
+              icon: const Icon(Icons.price_change),
+              label: const Text('Tarifeleri Listele'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder:
+                        (_) => RatePlanCreatePage(
+                          api: api, // <-- düzeltildi
+                          initialLotId: 1, // <-- parametre adı düzeltildi
+                        ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.add_card),
+              label: const Text('Tarife Ekle'),
             ),
           ],
         ),
