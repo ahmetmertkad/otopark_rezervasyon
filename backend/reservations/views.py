@@ -203,11 +203,98 @@ class ReservationViewSet(viewsets.ModelViewSet):
 
 # --- CheckEvent ------------------------------------------------------------
 
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters
+
 class CheckEventViewSet(viewsets.ModelViewSet):
     """
     /check-events/ CRUD
-    Sadece admin (veya görevli) kullanıcılar yazma yapabilsin diye IsAdminUser.
+    Sadece admin (veya görevli) yazabilir; listeleme adminlere açık.
+    Filtre: ?reservation=<id>  ?tip=check_in|check_out  ?gorevli=<user_id>
+            ?lot=<lot_id>  ?plaka=34ABC123
     """
-    queryset = CheckEvent.objects.select_related('reservation', 'gorevli').all()
+    queryset = CheckEvent.objects.select_related('reservation','gorevli','reservation__lot').all()
     serializer_class = CheckEventSerializer
     permission_classes = [permissions.IsAdminUser]
+
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = ['tip', 'reservation', 'gorevli']
+    search_fields = ['reservation__plaka']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        lot_id = self.request.query_params.get('lot')
+        if lot_id:
+            qs = qs.filter(reservation__lot_id=lot_id)
+        plaka = self.request.query_params.get('plaka')
+        if plaka:
+            qs = qs.filter(reservation__plaka__iexact=plaka)
+        # Bugün filtrelemesi için ?today=1
+        today = self.request.query_params.get('today')
+        if today in ('1','true','yes'):
+            from django.utils.timezone import now
+            d = now().date()
+            qs = qs.filter(zaman__date=d)
+        return qs.order_by('-zaman')
+
+
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAdminUser
+from django.utils import timezone
+
+from .models import Reservation, CheckEvent
+from .serializers import CheckByQRSerializer, ReservationDetailSerializer, CheckEventSerializer
+
+class CheckByQRView(APIView):
+    """
+    POST /reservation/check-by-qr/
+    Body: { "qr_token": "...", "tip": "check_in" | "check_out" }
+    Only staff (görevli/admin).
+    """
+    permission_classes = []
+
+    def post(self, request, *args, **kwargs):
+        ser = CheckByQRSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        token = ser.validated_data['qr_token']
+        tip   = ser.validated_data['tip']
+
+        try:
+            resv = Reservation.objects.select_related('lot', 'user', 'rateplan').get(qr_token=token)
+        except Reservation.DoesNotExist:
+            return Response({"detail": "Rezervasyon bulunamadı."}, status=status.HTTP_404_NOT_FOUND)
+
+        # İş kuralları
+        if tip == 'check_in':
+            if resv.durum in ['checked_in', 'checked_out', 'canceled']:
+                return Response({"detail": f"Bu rezervasyon için check-in yapılamaz (durum: {resv.durum})."}, status=status.HTTP_400_BAD_REQUEST)
+            # İstersen pending -> confirmed yap
+            if resv.durum == 'pending':
+                resv.durum = 'confirmed'
+            resv.durum = 'checked_in'
+            resv.save(update_fields=['durum'])
+
+        elif tip == 'check_out':
+            if resv.durum != 'checked_in':
+                return Response({"detail": "Check-out yalnızca 'checked_in' durumunda yapılabilir."}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Gerçek çıkış saatini şimdi olarak alıp ücreti yeniden hesaplamak istersen:
+            # resv.bitis = timezone.now()
+            # resv.durum = 'checked_out'
+            # resv.save(update_fields=['bitis', 'durum'])
+            # Eğer planlanan bitiş saati kalsın diyorsan sadece durum değiştir:
+            resv.durum = 'checked_out'
+            resv.save(update_fields=['durum'])
+
+        # Event kaydı
+        event = CheckEvent.objects.create(
+            reservation=resv,
+            tip=tip,
+            gorevli=request.user
+        )
+
+        return Response({
+            "detail": "OK",
+            "reservation": ReservationDetailSerializer(resv).data,
+            "event": CheckEventSerializer(event).data
+        }, status=status.HTTP_200_OK)

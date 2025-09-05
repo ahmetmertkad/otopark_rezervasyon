@@ -74,3 +74,10 @@ class CheckEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = CheckEvent
         fields = "__all__"
+
+
+from rest_framework import serializers
+
+class CheckByQRSerializer(serializers.Serializer):
+    qr_token = serializers.CharField(max_length=64)
+    tip = serializers.ChoiceField(choices=['check_in', 'check_out'])
